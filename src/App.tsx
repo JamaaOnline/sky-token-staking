@@ -391,92 +391,25 @@ function App() {
         const urlParams = new URLSearchParams(window.location.search)
         const hasOAuthParams = urlParams.has('code') || urlParams.has('state') || urlParams.has('oauth_token')
 
-        // Check if this is specifically a login callback (not a transaction signing callback)
-        // We only want to complete OAuth for login, not for transaction signing
-        const isLoginCallback = hasOAuthParams && !sessionStorage.getItem('xaman_connected')
-
-        console.log('URL params:', window.location.search)
-        console.log('Has OAuth params:', hasOAuthParams)
-        console.log('Is login callback:', isLoginCallback)
-        console.log('Session storage xaman_connected:', sessionStorage.getItem('xaman_connected'))
-
-        if (isLoginCallback) {
-          // We're returning from OAuth, need to complete the authorization
-          setLoading(true)
-          console.log('Completing OAuth authorization with stored instance...')
-
-          try {
-            const resolvedFlow = await xumm.authorize()
-            console.log('OAuth resolved flow:', resolvedFlow)
-            console.log('resolvedFlow.me:', resolvedFlow?.me)
-            console.log('resolvedFlow.sdk:', resolvedFlow?.sdk)
-
-            if (resolvedFlow && resolvedFlow.me && resolvedFlow.me.account) {
-              const userAccount = resolvedFlow.me.account
-
-              // Fetch token balance
-              let balance = '0'
-              try {
-                balance = await getSKYBalance(userAccount)
-              } catch (err) {
-                console.error('Failed to fetch balance:', err)
-              }
-
-              setWallet({
-                address: userAccount,
-                balance,
-                connected: true,
-                walletType: 'xaman',
-              })
-              setStakeAmount(balance)
-              setXummSdk(resolvedFlow.sdk)
-
-              // Mark that we've successfully connected
-              sessionStorage.setItem('xaman_connected', 'true')
-
-              // Clean up URL
-              window.history.replaceState({}, document.title, window.location.pathname)
-            } else {
-              const debugInfo = {
-                hasResolvedFlow: !!resolvedFlow,
-                hasMe: !!resolvedFlow?.me,
-                hasAccount: !!resolvedFlow?.me?.account,
-                resolvedFlowKeys: resolvedFlow ? Object.keys(resolvedFlow) : [],
-                meKeys: resolvedFlow?.me ? Object.keys(resolvedFlow.me) : []
-              }
-              console.error('OAuth resolved but missing account data:', debugInfo)
-              setError(`Failed to get account from Xaman. Debug: ${JSON.stringify(debugInfo, null, 2)}`)
-            }
-          } catch (err: any) {
-            console.error('Error completing OAuth:', err)
-            console.error('Error details:', err.message, err.stack)
-            const errorDetails = {
-              message: err.message,
-              name: err.name,
-              stack: err.stack?.split('\n').slice(0, 3).join(' | ')
-            }
-            setError(`OAuth Error: ${JSON.stringify(errorDetails, null, 2)}`)
-          } finally {
-            setLoading(false)
-          }
-          return
-        }
-
-        // If we have OAuth params but we're already connected, just clean up the URL
-        if (hasOAuthParams && sessionStorage.getItem('xaman_connected')) {
-          console.log('Already connected, cleaning up OAuth params from transaction return')
+        // If we have OAuth params, just clean them up and check state
+        if (hasOAuthParams) {
+          console.log('Has OAuth params, cleaning up URL')
           window.history.replaceState({}, document.title, window.location.pathname)
-          return
+          // Fall through to check state below
         }
 
         // Check if we have stored JWT from previous authorization
         const state = await xumm.state()
         console.log('Xaman state on mount:', state)
+        console.log('State.me:', state?.me)
+        console.log('State.sdk:', state?.sdk)
 
         if (state && state.me && state.me.account) {
           // User was previously authorized, reconnect
           setLoading(true)
           const userAccount = state.me.account
+
+          console.log('Found valid state, reconnecting with account:', userAccount)
 
           // Fetch token balance
           let balance = '0'
@@ -494,7 +427,13 @@ function App() {
           })
           setStakeAmount(balance)
           setXummSdk(state.sdk)
+          sessionStorage.setItem('xaman_connected', 'true')
           setLoading(false)
+        } else {
+          console.log('No valid state found after OAuth callback')
+          if (hasOAuthParams) {
+            setError('Login failed - please try connecting with Xaman again')
+          }
         }
       } catch (err) {
         console.error('Error checking Xaman state:', err)
