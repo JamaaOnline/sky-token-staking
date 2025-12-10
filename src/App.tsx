@@ -432,7 +432,15 @@ function App() {
         } else {
           console.log('No valid state found after OAuth callback')
           if (hasOAuthParams) {
-            setError('Login failed - please try connecting with Xaman again')
+            const stateDebug = {
+              hasState: !!state,
+              hasMe: !!state?.me,
+              hasAccount: !!state?.me?.account,
+              stateKeys: state ? Object.keys(state) : [],
+              meKeys: state?.me ? Object.keys(state.me) : [],
+              stateString: JSON.stringify(state)
+            }
+            setError(`OAuth callback received but no valid state. Debug: ${JSON.stringify(stateDebug, null, 2)}`)
           }
         }
       } catch (err) {
