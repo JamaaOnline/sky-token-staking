@@ -213,19 +213,33 @@ function App() {
         throw new Error('Failed to create Xaman signing request')
       }
 
-      // Check if we're on mobile - if so, open the deep link in a new window/tab
+      // Check if we're on mobile - open deep link using iframe or anchor trick
       const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
       if (isMobile && payload.next && payload.next.always) {
         console.log('Opening Xaman app with deep link:', payload.next.always)
-        // Try to open Xaman app without losing page context
-        // Use window.open to attempt opening in new context, falls back to deep link
-        const opened = window.open(payload.next.always, '_blank')
-        if (!opened) {
-          // Fallback: use location.href if popup blocked
-          console.log('Popup blocked, using location.href')
-          window.location.href = payload.next.always
-        }
+
+        // Use an invisible iframe to trigger the deep link without losing page context
+        const iframe = document.createElement('iframe')
+        iframe.style.display = 'none'
+        iframe.src = payload.next.always
+        document.body.appendChild(iframe)
+
+        // Remove iframe after a short delay
+        setTimeout(() => {
+          document.body.removeChild(iframe)
+        }, 1000)
+
+        // Also try using an anchor tag with target="_blank" as fallback
+        const anchor = document.createElement('a')
+        anchor.href = payload.next.always
+        anchor.target = '_blank'
+        anchor.rel = 'noopener noreferrer'
+        document.body.appendChild(anchor)
+        anchor.click()
+        document.body.removeChild(anchor)
+
+        console.log('Deep link triggered - waiting for signature via websocket')
       } else {
         console.log('Desktop mode - QR Code:', payload.refs?.qr_png)
       }
