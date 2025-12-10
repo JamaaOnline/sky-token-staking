@@ -416,10 +416,12 @@ Check console for full details.`
     }
 
     // Initialize XummPkce with event listeners
+    // Use implicit mode for cross-browser compatibility (mobile)
     const xumm = new XummPkce(WALLET_CONFIG.xummApiKey, {
       redirectUrl: window.location.origin,
       rememberJwt: true,
-      storage: window.localStorage
+      storage: window.localStorage,
+      implicit: true  // Allows cross-browser sign in (mobile Safari), less secure but necessary for mobile
     })
 
     console.log('✓ XummPkce instance created')
