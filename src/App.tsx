@@ -423,17 +423,25 @@ function App() {
               // Clean up URL
               window.history.replaceState({}, document.title, window.location.pathname)
             } else {
-              console.error('OAuth resolved but missing account data:', {
+              const debugInfo = {
                 hasResolvedFlow: !!resolvedFlow,
                 hasMe: !!resolvedFlow?.me,
-                hasAccount: !!resolvedFlow?.me?.account
-              })
-              setError('Failed to get account from Xaman. Please try connecting again.')
+                hasAccount: !!resolvedFlow?.me?.account,
+                resolvedFlowKeys: resolvedFlow ? Object.keys(resolvedFlow) : [],
+                meKeys: resolvedFlow?.me ? Object.keys(resolvedFlow.me) : []
+              }
+              console.error('OAuth resolved but missing account data:', debugInfo)
+              setError(`Failed to get account from Xaman. Debug: ${JSON.stringify(debugInfo, null, 2)}`)
             }
           } catch (err: any) {
             console.error('Error completing OAuth:', err)
             console.error('Error details:', err.message, err.stack)
-            setError(`Failed to complete Xaman authorization: ${err.message || 'Please try again.'}`)
+            const errorDetails = {
+              message: err.message,
+              name: err.name,
+              stack: err.stack?.split('\n').slice(0, 3).join(' | ')
+            }
+            setError(`OAuth Error: ${JSON.stringify(errorDetails, null, 2)}`)
           } finally {
             setLoading(false)
           }
