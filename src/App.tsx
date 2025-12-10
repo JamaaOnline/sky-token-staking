@@ -116,8 +116,13 @@ function App() {
    * Connect to Xaman wallet via QR code or deep link
    */
   const connectXamanWallet = async () => {
+    console.log('=== connectXamanWallet called ===')
+    console.log('xummPkce instance:', xummPkce)
+
     if (!xummPkce) {
-      setError('Xaman not initialized. Please refresh the page.')
+      const errorMsg = 'Xaman not initialized. Please refresh the page.'
+      console.error(errorMsg)
+      setError(errorMsg)
       return
     }
 
@@ -125,14 +130,38 @@ function App() {
     setError('')
 
     try {
-      console.log('Calling xummPkce.authorize()')
+      console.log('Checking if already authorized...')
+      const existingState = await xummPkce.state?.()
+      console.log('Existing state:', existingState)
+
+      if (existingState?.me?.account) {
+        console.log('Already authorized! Account:', existingState.me.account)
+        await handleXummSignIn(existingState)
+        return
+      }
+
+      console.log('Not authorized yet. Calling xummPkce.authorize()...')
+      console.log('User agent:', navigator.userAgent)
+      console.log('Is mobile:', /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent))
+
       // This will trigger either 'success' or 'error' events
       // On mobile, this will redirect to Xaman app
       // The events will handle the rest
-      await xummPkce.authorize?.()
+      const result = await xummPkce.authorize?.()
+      console.log('authorize() returned:', result)
     } catch (err: any) {
-      console.error('Xaman connection error:', err)
-      setError(`Failed to connect to Xaman: ${err.message || 'Unknown error'}`)
+      console.error('=== Xaman connection error ===')
+      console.error('Error:', err)
+      console.error('Message:', err.message)
+      console.error('Stack:', err.stack)
+
+      const fullErrorMsg = `Failed to connect to Xaman
+Error: ${err.message}
+Stack: ${err.stack || 'No stack trace'}
+
+Check console for full details.`
+
+      setError(fullErrorMsg)
       setLoading(false)
     }
   }
@@ -313,37 +342,78 @@ function App() {
    * Handle Xaman sign-in using event-based approach (recommended by xumm-oauth2-pkce)
    */
   const handleXummSignIn = async (state: any) => {
-    if (state?.me?.account) {
-      const userAccount = state.me.account
-      console.log('Xaman sign-in successful:', userAccount)
+    console.log('=== handleXummSignIn called ===')
+    console.log('Full state object:', JSON.stringify(state, null, 2))
+    console.log('state?.me:', state?.me)
+    console.log('state?.me?.account:', state?.me?.account)
+    console.log('state?.sdk:', state?.sdk)
 
-      setLoading(true)
-
-      // Fetch token balance
-      let balance = '0'
-      try {
-        balance = await getSKYBalance(userAccount)
-      } catch (err) {
-        console.error('Failed to fetch balance:', err)
-      }
-
-      setWallet({
-        address: userAccount,
-        balance,
-        connected: true,
-        walletType: 'xaman',
-      })
-      setStakeAmount(balance)
-      setXummSdk(state.sdk)
+    if (!state) {
+      const errorMsg = 'Xaman state is null or undefined'
+      console.error(errorMsg)
+      setError(errorMsg)
       setLoading(false)
+      return
     }
+
+    if (!state.me) {
+      const errorMsg = `Xaman state.me is missing. State keys: ${Object.keys(state).join(', ')}`
+      console.error(errorMsg)
+      setError(errorMsg)
+      setLoading(false)
+      return
+    }
+
+    if (!state.me.account) {
+      const errorMsg = `Xaman state.me.account is missing. State.me keys: ${Object.keys(state.me).join(', ')}`
+      console.error(errorMsg)
+      setError(errorMsg)
+      setLoading(false)
+      return
+    }
+
+    const userAccount = state.me.account
+    console.log('✓ Xaman sign-in successful! Account:', userAccount)
+
+    setLoading(true)
+
+    // Fetch token balance
+    let balance = '0'
+    try {
+      console.log('Fetching SKY balance for:', userAccount)
+      balance = await getSKYBalance(userAccount)
+      console.log('✓ Balance fetched:', balance)
+    } catch (err: any) {
+      console.error('Failed to fetch balance:', err)
+      setError(`Connected to Xaman but failed to fetch balance: ${err.message}`)
+    }
+
+    setWallet({
+      address: userAccount,
+      balance,
+      connected: true,
+      walletType: 'xaman',
+    })
+    setStakeAmount(balance)
+    setXummSdk(state.sdk)
+    setLoading(false)
+    console.log('✓ Wallet connected successfully')
   }
 
   /**
    * Initialize Xaman OAuth on mount - event-based approach
    */
   useEffect(() => {
-    if (!WALLET_CONFIG.xummApiKey) return
+    console.log('=== Initializing Xaman OAuth ===')
+    console.log('API Key:', WALLET_CONFIG.xummApiKey ? 'Present' : 'MISSING')
+    console.log('Redirect URL:', window.location.origin)
+    console.log('Current URL:', window.location.href)
+    console.log('URL search params:', window.location.search)
+
+    if (!WALLET_CONFIG.xummApiKey) {
+      console.error('Xumm API key is missing!')
+      return
+    }
 
     // Initialize XummPkce with event listeners
     const xumm = new XummPkce(WALLET_CONFIG.xummApiKey, {
@@ -352,35 +422,68 @@ function App() {
       storage: window.localStorage
     })
 
+    console.log('✓ XummPkce instance created')
+
     // Store instance for use in connect button
     setXummPkce(xumm)
 
     // Define event handlers
     const onRetrieved = async () => {
-      console.log('Retrieved: from localStorage or mobile browser redirect')
-      const state = await xumm.state?.()
-      handleXummSignIn(state)
+      console.log('=== EVENT: Retrieved ===')
+      console.log('Session retrieved from localStorage or mobile browser redirect')
+      try {
+        const state = await xumm.state?.()
+        console.log('State after retrieval:', state)
+        await handleXummSignIn(state)
+      } catch (err: any) {
+        console.error('Error in onRetrieved handler:', err)
+        setError(`Retrieved event error: ${err.message}. Stack: ${err.stack}`)
+        setLoading(false)
+      }
     }
 
     const onSuccess = async () => {
-      console.log('Success: User signed in successfully')
-      const state = await xumm.state?.()
-      handleXummSignIn(state)
+      console.log('=== EVENT: Success ===')
+      console.log('User signed in successfully')
+      try {
+        const state = await xumm.state?.()
+        console.log('State after success:', state)
+        await handleXummSignIn(state)
+      } catch (err: any) {
+        console.error('Error in onSuccess handler:', err)
+        setError(`Success event error: ${err.message}. Stack: ${err.stack}`)
+        setLoading(false)
+      }
     }
 
     const onError = (error: Error) => {
+      console.error('=== EVENT: Error ===')
       console.error('Xaman OAuth error:', error)
-      setError(`Xaman authorization failed: ${error.message}`)
+      console.error('Error message:', error.message)
+      console.error('Error stack:', error.stack)
+      console.error('Error name:', error.name)
+
+      const fullErrorMsg = `Xaman OAuth Error
+Message: ${error.message}
+Name: ${error.name}
+Stack: ${error.stack || 'No stack trace'}
+
+Please check the console for more details.`
+
+      setError(fullErrorMsg)
       setLoading(false)
     }
 
     // Register event listeners
+    console.log('Registering event listeners...')
     xumm.on?.('retrieved', onRetrieved)
     xumm.on?.('success', onSuccess)
     xumm.on?.('error', onError)
+    console.log('✓ Event listeners registered')
 
     // Cleanup - remove event listeners
     return () => {
+      console.log('Cleaning up Xaman OAuth event listeners')
       xumm.off?.('retrieved', onRetrieved)
       xumm.off?.('success', onSuccess)
       xumm.off?.('error', onError)
