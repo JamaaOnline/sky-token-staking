@@ -1,12 +1,9 @@
 import { useState, useEffect } from 'react'
 import { isInstalled, getAddress, getNetwork } from '@gemwallet/api'
-import { XummPkce } from 'xumm-oauth2-pkce'
+import { XummSdk, type XummTypes } from 'xumm-sdk'
 import './App.css'
 import { XRPL_CONFIG, WALLET_CONFIG, STAKING_CONFIG } from './config'
 import { getSKYBalance, sendSKYTokens, signTermsAgreement } from './services/xrplService'
-
-// Type for Xumm SDK
-type XummSdk = any
 
 interface WalletState {
   connected: boolean
@@ -112,7 +109,7 @@ function App() {
   }
 
   /**
-   * Connect to Xaman wallet via QR code or deep link
+   * Connect to Xaman wallet via SignIn payload (works on mobile)
    */
   const connectXamanWallet = async () => {
     setLoading(true)
@@ -125,72 +122,53 @@ function App() {
         return
       }
 
-      // Initialize Xumm PKCE client
-      const xumm = new XummPkce(WALLET_CONFIG.xummApiKey, {
-        redirectUrl: window.location.origin,
-        rememberJwt: true
+      // Use Xumm SDK directly (not OAuth) - works better for mobile
+      const xumm = new XummSdk(WALLET_CONFIG.xummApiKey)
+
+      console.log('Creating SignIn payload for Xaman...')
+
+      // Create a SignIn payload
+      const payload = await xumm.payload.createAndSubscribe({
+        txjson: {
+          TransactionType: 'SignIn'
+        }
       })
 
-      // Check if already authorized
-      const existingState = await xumm.state()
-      console.log('Existing state before authorize:', existingState)
-
-      if (existingState && existingState.me && existingState.me.account) {
-        // Already authorized, just use existing state
-        console.log('Already authorized, using existing state')
-        const userAccount = existingState.me.account
-        let balance = '0'
-        try {
-          balance = await getSKYBalance(userAccount)
-        } catch (err) {
-          console.error('Failed to fetch balance:', err)
-        }
-
-        setWallet({
-          address: userAccount,
-          balance,
-          connected: true,
-          walletType: 'xaman',
-        })
-        setStakeAmount(balance)
-        setXummSdk(existingState.sdk)
-        setLoading(false)
-        return
-      }
-
-      // Not authorized yet, start OAuth flow
-      console.log('No existing auth, starting OAuth flow')
+      console.log('SignIn payload created:', payload)
+      console.log('Payload refs:', payload.created.refs)
 
       // Check if we're on mobile
       const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
-      console.log('Is mobile:', isMobile, 'User agent:', navigator.userAgent)
+      if (isMobile && payload.created.next?.always) {
+        console.log('Opening Xaman app:', payload.created.next.always)
+        // Open Xaman app
+        window.location.href = payload.created.next.always
+      } else {
+        console.log('Desktop - QR code available at:', payload.created.refs.qr_png)
+        setError(`Scan QR code in Xaman app: ${payload.created.refs.qr_png}`)
+      }
 
-      // Authorize (on mobile, opens Xaman app directly; on desktop, shows QR code)
-      // This will redirect the page on mobile, so code after this won't execute
-      const resolvedFlow = await xumm.authorize()
+      // Wait for user to sign
+      const resolvedPayload = await payload.resolved as XummTypes.XummGetPayloadResponse
 
-      console.log('Xumm authorization:', resolvedFlow)
+      console.log('SignIn resolved:', resolvedPayload)
 
-      if (!resolvedFlow || !resolvedFlow.me) {
-        setError('Xumm authorization failed. Please try again.')
+      if (resolvedPayload.meta.signed === false) {
+        setError('Sign-in was rejected in Xaman app')
         setLoading(false)
         return
       }
 
-      // Get user account from resolved flow
-      const userAccount = resolvedFlow.me.account
+      const userAccount = resolvedPayload.response.account
 
       if (!userAccount) {
-        setError('Failed to get account from Xumm.')
+        setError('Failed to get account from Xaman')
         setLoading(false)
         return
       }
 
-      // The SDK is available from the resolvedFlow for transaction signing
-      if (resolvedFlow.sdk) {
-        setXummSdk(resolvedFlow.sdk)
-      }
+      console.log('Successfully signed in with account:', userAccount)
 
       // Fetch token balance
       let balance = '0'
@@ -198,7 +176,6 @@ function App() {
         balance = await getSKYBalance(userAccount)
       } catch (err) {
         console.error('Failed to fetch balance:', err)
-        // Continue with 0 balance rather than blocking connection
       }
 
       setWallet({
@@ -208,6 +185,9 @@ function App() {
         walletType: 'xaman',
       })
       setStakeAmount(balance)
+      setXummSdk(xumm) // Store the SDK for transaction signing
+      sessionStorage.setItem('xaman_connected', 'true')
+      sessionStorage.setItem('xaman_account', userAccount)
     } catch (err: any) {
       console.error('Xaman connection error:', err)
       setError(`Failed to connect to Xaman: ${err.message || 'Unknown error'}`)
@@ -222,81 +202,49 @@ function App() {
   const signTransactionWithXaman = async (transaction: any): Promise<string> => {
     console.log('signTransactionWithXaman called')
     console.log('xummSdk:', xummSdk)
-    console.log('xummSdk.payload:', xummSdk?.payload)
 
     if (!xummSdk) {
       throw new Error('Xaman SDK not initialized. Please reconnect your wallet.')
     }
 
-    if (!xummSdk.payload || !xummSdk.payload.create) {
-      throw new Error('Xaman SDK payload methods not available. Please reconnect your wallet.')
-    }
-
     try {
       console.log('Creating Xaman payload for transaction:', transaction)
 
-      // Create payload for XAMAN to sign
-      const payload = await xummSdk.payload.create({
+      // Create payload and subscribe in one call
+      const payload = await xummSdk.payload.createAndSubscribe({
         txjson: transaction
       })
 
-      console.log('Xaman payload created:', payload)
-
-      if (!payload || !payload.uuid) {
-        throw new Error('Failed to create Xaman signing request')
-      }
+      console.log('Xaman payload created:', payload.created)
 
       // Check if we're on mobile - redirect to Xaman app
       const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
-      if (isMobile && payload.next && payload.next.always) {
-        console.log('Opening Xaman app with deep link:', payload.next.always)
+      if (isMobile && payload.created.next?.always) {
+        console.log('Opening Xaman app with deep link:', payload.created.next.always)
         // On iOS, this will open Safari. Users should use Safari for mobile signing.
-        window.location.href = payload.next.always
+        window.location.href = payload.created.next.always
       } else {
-        console.log('Desktop mode - QR Code:', payload.refs?.qr_png)
+        console.log('Desktop mode - QR Code:', payload.created.refs.qr_png)
       }
 
-      // Subscribe to payload to wait for user signature
-      const subscription = await xummSdk.payload.subscribe(payload.uuid)
+      // Wait for user to sign
+      const resolvedPayload = await payload.resolved as XummTypes.XummGetPayloadResponse
 
-      return new Promise((resolve, reject) => {
-        subscription.websocket.onmessage = (msg: any) => {
-          try {
-            const data = JSON.parse(msg.data.toString())
-            console.log('Xaman websocket message:', data)
+      console.log('Transaction resolved:', resolvedPayload)
 
-            // Check if transaction was signed
-            if (typeof data.signed === 'boolean') {
-              if (data.signed === true) {
-                // Transaction signed successfully
-                console.log('Transaction signed! TX ID:', data.txid)
-                resolve(data.txid)
-                subscription.resolve()
-              } else {
-                // User rejected the transaction
-                console.log('Transaction rejected by user')
-                reject(new Error('Transaction was rejected by user'))
-                subscription.resolve()
-              }
-            }
-          } catch (e) {
-            console.error('Error parsing websocket message:', e)
-          }
-        }
+      if (resolvedPayload.meta.signed === false) {
+        throw new Error('Transaction was rejected by user')
+      }
 
-        subscription.websocket.onerror = (error: any) => {
-          console.error('Xaman websocket error:', error)
-          reject(new Error('Failed to communicate with Xaman'))
-          subscription.resolve()
-        }
+      const txid = resolvedPayload.response.txid
 
-        // Add timeout in case websocket doesn't respond
-        setTimeout(() => {
-          reject(new Error('Transaction signing timed out. Please try again.'))
-          subscription.resolve()
-        }, 120000) // 2 minute timeout
-      })
+      if (!txid) {
+        throw new Error('Transaction was signed but no transaction ID was returned')
+      }
+
+      console.log('Transaction signed! TX ID:', txid)
+      return txid
     } catch (err: any) {
       console.error('Xaman signing error:', err)
       throw new Error(err.message || 'Failed to sign transaction with Xaman')
@@ -405,82 +353,43 @@ function App() {
       }
     }
 
-    // Check if returning from Xaman authorization
-    const checkXamanReturn = async () => {
+    // Check if we have a stored Xaman session
+    const checkXamanSession = async () => {
       try {
-        if (!WALLET_CONFIG.xummApiKey) return
-
-        // Create XummPkce instance with same config - library stores state in localStorage
-        const xumm = new XummPkce(WALLET_CONFIG.xummApiKey, {
-          redirectUrl: window.location.origin,
-          rememberJwt: true,
-          storage: window.localStorage
-        })
-
-        // Check if we're in the middle of an OAuth callback
-        // The URL will have OAuth parameters if returning from Xaman
-        const urlParams = new URLSearchParams(window.location.search)
-        const hasOAuthParams = urlParams.has('code') || urlParams.has('state') || urlParams.has('oauth_token')
-
-        // If we have OAuth params, just clean them up and check state
-        if (hasOAuthParams) {
-          console.log('Has OAuth params, cleaning up URL')
-          window.history.replaceState({}, document.title, window.location.pathname)
-          // Fall through to check state below
-        }
-
-        // Check if we have stored JWT from previous authorization
-        const state = await xumm.state()
-        console.log('Xaman state on mount:', state)
-        console.log('State.me:', state?.me)
-        console.log('State.sdk:', state?.sdk)
-
-        if (state && state.me && state.me.account) {
-          // User was previously authorized, reconnect
+        const storedAccount = sessionStorage.getItem('xaman_account')
+        if (storedAccount) {
           setLoading(true)
-          const userAccount = state.me.account
-
-          console.log('Found valid state, reconnecting with account:', userAccount)
+          console.log('Found stored Xaman account:', storedAccount)
 
           // Fetch token balance
           let balance = '0'
           try {
-            balance = await getSKYBalance(userAccount)
+            balance = await getSKYBalance(storedAccount)
           } catch (err) {
             console.error('Failed to fetch balance:', err)
+            // If balance fetch fails, clear the session
+            sessionStorage.removeItem('xaman_account')
+            sessionStorage.removeItem('xaman_connected')
+            setLoading(false)
+            return
           }
 
           setWallet({
-            address: userAccount,
+            address: storedAccount,
             balance,
             connected: true,
             walletType: 'xaman',
           })
           setStakeAmount(balance)
-          setXummSdk(state.sdk)
-          sessionStorage.setItem('xaman_connected', 'true')
           setLoading(false)
-        } else {
-          console.log('No valid state found after OAuth callback')
-          if (hasOAuthParams) {
-            const stateDebug = {
-              hasState: !!state,
-              hasMe: !!state?.me,
-              hasAccount: !!state?.me?.account,
-              stateKeys: state ? Object.keys(state) : [],
-              meKeys: state?.me ? Object.keys(state.me) : [],
-              stateString: JSON.stringify(state)
-            }
-            setError(`OAuth callback received but no valid state. Debug: ${JSON.stringify(stateDebug, null, 2)}`)
-          }
         }
       } catch (err) {
-        console.error('Error checking Xaman state:', err)
+        console.error('Error checking Xaman session:', err)
       }
     }
 
     checkGemWallet()
-    checkXamanReturn()
+    checkXamanSession()
   }, [])
 
   return (
