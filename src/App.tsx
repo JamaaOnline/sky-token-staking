@@ -110,7 +110,7 @@ function App() {
   }
 
   /**
-   * Connect to Xaman wallet via QR code
+   * Connect to Xaman wallet via QR code or deep link
    */
   const connectXamanWallet = async () => {
     setLoading(true)
@@ -124,9 +124,17 @@ function App() {
       }
 
       // Initialize Xumm PKCE client
-      const xumm = new XummPkce(WALLET_CONFIG.xummApiKey)
+      const xumm = new XummPkce(WALLET_CONFIG.xummApiKey, {
+        redirectUrl: window.location.origin,
+        rememberJwt: true
+      })
 
-      // Authorize (generates QR code and waits for user to scan)
+      // Check if we're on mobile
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+
+      console.log('Is mobile:', isMobile, 'User agent:', navigator.userAgent)
+
+      // Authorize (on mobile, opens Xaman app directly; on desktop, shows QR code)
       const resolvedFlow = await xumm.authorize()
 
       console.log('Xumm authorization:', resolvedFlow)
@@ -339,7 +347,50 @@ function App() {
       }
     }
 
+    // Check if returning from Xaman authorization
+    const checkXamanReturn = async () => {
+      try {
+        if (!WALLET_CONFIG.xummApiKey) return
+
+        const xumm = new XummPkce(WALLET_CONFIG.xummApiKey, {
+          redirectUrl: window.location.origin,
+          rememberJwt: true
+        })
+
+        // Check if we have stored JWT from previous authorization
+        const state = await xumm.state()
+        console.log('Xaman state on mount:', state)
+
+        if (state && state.me && state.me.account) {
+          // User was previously authorized, reconnect
+          setLoading(true)
+          const userAccount = state.me.account
+
+          // Fetch token balance
+          let balance = '0'
+          try {
+            balance = await getSKYBalance(userAccount)
+          } catch (err) {
+            console.error('Failed to fetch balance:', err)
+          }
+
+          setWallet({
+            address: userAccount,
+            balance,
+            connected: true,
+            walletType: 'xaman',
+          })
+          setStakeAmount(balance)
+          setXummSdk(state.sdk)
+          setLoading(false)
+        }
+      } catch (err) {
+        console.error('Error checking Xaman state:', err)
+      }
+    }
+
     checkGemWallet()
+    checkXamanReturn()
   }, [])
 
   return (
