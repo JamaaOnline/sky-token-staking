@@ -397,6 +397,8 @@ function App() {
           try {
             const resolvedFlow = await xumm.authorize()
             console.log('OAuth resolved flow:', resolvedFlow)
+            console.log('resolvedFlow.me:', resolvedFlow?.me)
+            console.log('resolvedFlow.sdk:', resolvedFlow?.sdk)
 
             if (resolvedFlow && resolvedFlow.me && resolvedFlow.me.account) {
               const userAccount = resolvedFlow.me.account
@@ -420,10 +422,18 @@ function App() {
 
               // Clean up URL
               window.history.replaceState({}, document.title, window.location.pathname)
+            } else {
+              console.error('OAuth resolved but missing account data:', {
+                hasResolvedFlow: !!resolvedFlow,
+                hasMe: !!resolvedFlow?.me,
+                hasAccount: !!resolvedFlow?.me?.account
+              })
+              setError('Failed to get account from Xaman. Please try connecting again.')
             }
-          } catch (err) {
+          } catch (err: any) {
             console.error('Error completing OAuth:', err)
-            setError('Failed to complete Xaman authorization. Please try again.')
+            console.error('Error details:', err.message, err.stack)
+            setError(`Failed to complete Xaman authorization: ${err.message || 'Please try again.'}`)
           } finally {
             setLoading(false)
           }
