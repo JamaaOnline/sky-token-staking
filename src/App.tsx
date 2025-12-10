@@ -44,6 +44,8 @@ function App() {
     setError('')
     setSuccess('')
     setXummSdk(null)
+    // Clear session storage
+    sessionStorage.removeItem('xaman_connected')
   }
 
   /**
@@ -387,9 +389,16 @@ function App() {
         const urlParams = new URLSearchParams(window.location.search)
         const hasOAuthParams = urlParams.has('code') || urlParams.has('state') || urlParams.has('oauth_token')
 
-        console.log('URL params:', window.location.search, 'Has OAuth params:', hasOAuthParams)
+        // Check if this is specifically a login callback (not a transaction signing callback)
+        // We only want to complete OAuth for login, not for transaction signing
+        const isLoginCallback = hasOAuthParams && !sessionStorage.getItem('xaman_connected')
 
-        if (hasOAuthParams) {
+        console.log('URL params:', window.location.search)
+        console.log('Has OAuth params:', hasOAuthParams)
+        console.log('Is login callback:', isLoginCallback)
+        console.log('Session storage xaman_connected:', sessionStorage.getItem('xaman_connected'))
+
+        if (isLoginCallback) {
           // We're returning from OAuth, need to complete the authorization
           setLoading(true)
           console.log('Completing OAuth authorization...')
@@ -420,6 +429,9 @@ function App() {
               setStakeAmount(balance)
               setXummSdk(resolvedFlow.sdk)
 
+              // Mark that we've successfully connected
+              sessionStorage.setItem('xaman_connected', 'true')
+
               // Clean up URL
               window.history.replaceState({}, document.title, window.location.pathname)
             } else {
@@ -445,6 +457,13 @@ function App() {
           } finally {
             setLoading(false)
           }
+          return
+        }
+
+        // If we have OAuth params but we're already connected, just clean up the URL
+        if (hasOAuthParams && sessionStorage.getItem('xaman_connected')) {
+          console.log('Already connected, cleaning up OAuth params from transaction return')
+          window.history.replaceState({}, document.title, window.location.pathname)
           return
         }
 
