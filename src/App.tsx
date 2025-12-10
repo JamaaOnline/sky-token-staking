@@ -357,6 +357,54 @@ function App() {
           rememberJwt: true
         })
 
+        // Check if we're in the middle of an OAuth callback
+        // The URL will have OAuth parameters if returning from Xaman
+        const urlParams = new URLSearchParams(window.location.search)
+        const hasOAuthParams = urlParams.has('code') || urlParams.has('state') || urlParams.has('oauth_token')
+
+        console.log('URL params:', window.location.search, 'Has OAuth params:', hasOAuthParams)
+
+        if (hasOAuthParams) {
+          // We're returning from OAuth, need to complete the authorization
+          setLoading(true)
+          console.log('Completing OAuth authorization...')
+
+          try {
+            const resolvedFlow = await xumm.authorize()
+            console.log('OAuth resolved flow:', resolvedFlow)
+
+            if (resolvedFlow && resolvedFlow.me && resolvedFlow.me.account) {
+              const userAccount = resolvedFlow.me.account
+
+              // Fetch token balance
+              let balance = '0'
+              try {
+                balance = await getSKYBalance(userAccount)
+              } catch (err) {
+                console.error('Failed to fetch balance:', err)
+              }
+
+              setWallet({
+                address: userAccount,
+                balance,
+                connected: true,
+                walletType: 'xaman',
+              })
+              setStakeAmount(balance)
+              setXummSdk(resolvedFlow.sdk)
+
+              // Clean up URL
+              window.history.replaceState({}, document.title, window.location.pathname)
+            }
+          } catch (err) {
+            console.error('Error completing OAuth:', err)
+            setError('Failed to complete Xaman authorization. Please try again.')
+          } finally {
+            setLoading(false)
+          }
+          return
+        }
+
         // Check if we have stored JWT from previous authorization
         const state = await xumm.state()
         console.log('Xaman state on mount:', state)
