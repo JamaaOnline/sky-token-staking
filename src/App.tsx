@@ -187,22 +187,47 @@ function App() {
    * Sign and submit transaction with Xaman
    */
   const signTransactionWithXaman = async (transaction: any): Promise<string> => {
+    console.log('signTransactionWithXaman called')
+    console.log('xummSdk:', xummSdk)
+    console.log('xummSdk.payload:', xummSdk?.payload)
+
     if (!xummSdk) {
       throw new Error('Xaman SDK not initialized. Please reconnect your wallet.')
     }
 
+    if (!xummSdk.payload || !xummSdk.payload.create) {
+      throw new Error('Xaman SDK payload methods not available. Please reconnect your wallet.')
+    }
+
     try {
+      console.log('Creating Xaman payload for transaction:', transaction)
+
       // Create payload for XAMAN to sign
       const payload = await xummSdk.payload.create({
         txjson: transaction
       })
 
       console.log('Xaman payload created:', payload)
-      console.log('QR Code:', payload.refs.qr_png)
-      console.log('Deep Link:', payload.next.always)
 
       if (!payload || !payload.uuid) {
         throw new Error('Failed to create Xaman signing request')
+      }
+
+      // Check if we're on mobile - if so, open the deep link in a new window/tab
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+
+      if (isMobile && payload.next && payload.next.always) {
+        console.log('Opening Xaman app with deep link:', payload.next.always)
+        // Try to open Xaman app without losing page context
+        // Use window.open to attempt opening in new context, falls back to deep link
+        const opened = window.open(payload.next.always, '_blank')
+        if (!opened) {
+          // Fallback: use location.href if popup blocked
+          console.log('Popup blocked, using location.href')
+          window.location.href = payload.next.always
+        }
+      } else {
+        console.log('Desktop mode - QR Code:', payload.refs?.qr_png)
       }
 
       // Subscribe to payload to wait for user signature
@@ -238,6 +263,12 @@ function App() {
           reject(new Error('Failed to communicate with Xaman'))
           subscription.resolve()
         }
+
+        // Add timeout in case websocket doesn't respond
+        setTimeout(() => {
+          reject(new Error('Transaction signing timed out. Please try again.'))
+          subscription.resolve()
+        }, 120000) // 2 minute timeout
       })
     } catch (err: any) {
       console.error('Xaman signing error:', err)
