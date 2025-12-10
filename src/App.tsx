@@ -343,10 +343,15 @@ Check console for full details.`
    */
   const handleXummSignIn = async (state: any) => {
     console.log('=== handleXummSignIn called ===')
-    console.log('Full state object:', JSON.stringify(state, null, 2))
+
+    // Safe logging without JSON.stringify (avoids circular reference errors)
+    console.log('State type:', typeof state)
+    console.log('State keys:', state ? Object.keys(state).join(', ') : 'null')
     console.log('state?.me:', state?.me)
+    console.log('state?.me keys:', state?.me ? Object.keys(state.me).join(', ') : 'null')
     console.log('state?.me?.account:', state?.me?.account)
-    console.log('state?.sdk:', state?.sdk)
+    console.log('state?.jwt:', state?.jwt ? 'Present' : 'Missing')
+    console.log('state?.sdk:', state?.sdk ? 'Present (SDK instance)' : 'Missing')
 
     if (!state) {
       const errorMsg = 'Xaman state is null or undefined'
@@ -435,11 +440,20 @@ Check console for full details.`
       console.log('Session retrieved from localStorage or mobile browser redirect')
       try {
         const state = await xumm.state?.()
-        console.log('State after retrieval:', state)
+        console.log('State after retrieval - type:', typeof state)
+        console.log('State keys:', state ? Object.keys(state).join(', ') : 'null')
         await handleXummSignIn(state)
       } catch (err: any) {
         console.error('Error in onRetrieved handler:', err)
-        setError(`Retrieved event error: ${err.message}. Stack: ${err.stack}`)
+        console.error('Error name:', err.name)
+        console.error('Error message:', err.message)
+        console.error('Error stack:', err.stack)
+        setError(`Retrieved event error: ${err.name}: ${err.message}
+
+Full error stack:
+${err.stack}
+
+Check console for details.`)
         setLoading(false)
       }
     }
@@ -449,11 +463,20 @@ Check console for full details.`
       console.log('User signed in successfully')
       try {
         const state = await xumm.state?.()
-        console.log('State after success:', state)
+        console.log('State after success - type:', typeof state)
+        console.log('State keys:', state ? Object.keys(state).join(', ') : 'null')
         await handleXummSignIn(state)
       } catch (err: any) {
         console.error('Error in onSuccess handler:', err)
-        setError(`Success event error: ${err.message}. Stack: ${err.stack}`)
+        console.error('Error name:', err.name)
+        console.error('Error message:', err.message)
+        console.error('Error stack:', err.stack)
+        setError(`Success event error: ${err.name}: ${err.message}
+
+Full error stack:
+${err.stack}
+
+Check console for details.`)
         setLoading(false)
       }
     }
