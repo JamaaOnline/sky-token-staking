@@ -379,9 +379,11 @@ function App() {
       try {
         if (!WALLET_CONFIG.xummApiKey) return
 
+        // Create XummPkce instance with same config - library stores state in localStorage
         const xumm = new XummPkce(WALLET_CONFIG.xummApiKey, {
           redirectUrl: window.location.origin,
-          rememberJwt: true
+          rememberJwt: true,
+          storage: window.localStorage
         })
 
         // Check if we're in the middle of an OAuth callback
@@ -401,7 +403,7 @@ function App() {
         if (isLoginCallback) {
           // We're returning from OAuth, need to complete the authorization
           setLoading(true)
-          console.log('Completing OAuth authorization...')
+          console.log('Completing OAuth authorization with stored instance...')
 
           try {
             const resolvedFlow = await xumm.authorize()
