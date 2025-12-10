@@ -131,12 +131,43 @@ function App() {
         rememberJwt: true
       })
 
+      // Check if already authorized
+      const existingState = await xumm.state()
+      console.log('Existing state before authorize:', existingState)
+
+      if (existingState && existingState.me && existingState.me.account) {
+        // Already authorized, just use existing state
+        console.log('Already authorized, using existing state')
+        const userAccount = existingState.me.account
+        let balance = '0'
+        try {
+          balance = await getSKYBalance(userAccount)
+        } catch (err) {
+          console.error('Failed to fetch balance:', err)
+        }
+
+        setWallet({
+          address: userAccount,
+          balance,
+          connected: true,
+          walletType: 'xaman',
+        })
+        setStakeAmount(balance)
+        setXummSdk(existingState.sdk)
+        setLoading(false)
+        return
+      }
+
+      // Not authorized yet, start OAuth flow
+      console.log('No existing auth, starting OAuth flow')
+
       // Check if we're on mobile
       const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
       console.log('Is mobile:', isMobile, 'User agent:', navigator.userAgent)
 
       // Authorize (on mobile, opens Xaman app directly; on desktop, shows QR code)
+      // This will redirect the page on mobile, so code after this won't execute
       const resolvedFlow = await xumm.authorize()
 
       console.log('Xumm authorization:', resolvedFlow)
